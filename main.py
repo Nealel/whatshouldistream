@@ -7,21 +7,20 @@ import os
 from dotenv import load_dotenv, dotenv_values
 load_dotenv()
 
-STEAM_ID = os.getenv("STEAM_ID")
-API_KEY = os.getenv("API_KEY")
-TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
-TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
-
-max_streams = 0
-game_tags = []
+# User Configuration
+max_streams = 0 # current streamers on twitch
+game_tags = [] # steamspy genre tags ["Shooter"]
+min_recent_playtime = 10 # average playtime over last 2 weeks
+use_cache = True # faster but may give stale answers
 min_release_date = None # todo make this work
-min_release_players = 10
-use_cache = True
 
 game_ids_filename = "game_ids.txt"
 game_data_filename = "game_data.json"
 
-# todo filters for year, genre, and popularity
+STEAM_ID = os.getenv("STEAM_ID")
+API_KEY = os.getenv("API_KEY")
+TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
+TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
 
 
 def get_owned_games(api_key, steam_id):
@@ -202,16 +201,17 @@ filtered_games = {}
 for game, data in game_data.items():
     if data['streams_count'] > max_streams:
         continue
-    if min_release_date and data['steam_info']['release_date'] < min_release_date:
-        continue
 
-    if data['steamspy_data']['average_2weeks'] < min_release_players:
+    if data['steamspy_data']['average_2weeks'] < min_recent_playtime:
         continue
 
     steamspy_tag_names = [key for key in data['steamspy_data']['tags']]
+    tag_match = True
     for tag in game_tags:
         if tag not in steamspy_tag_names:
-            continue
+            tag_match = False
+    if not tag_match:
+        continue
 
     filtered_games[game] = data
 
@@ -220,4 +220,5 @@ sorted_games = sorted(filtered_games.items(), key=lambda x: x[1]['steamspy_data'
 
 # print all games
 for game in sorted_games:
-    print(f"{game[0]}: {game[1]['streams_count']} streams, {game[1]['steamspy_data']['average_2weeks']} 2week average")
+    print(f"{game[1]['steamspy_data']['average_2weeks']}\t {game[0]}")
+    # print(f"{game[0]}: {game[1]['streams_count']} streams, current popularity: {game[1]['steamspy_data']['average_2weeks']}")
