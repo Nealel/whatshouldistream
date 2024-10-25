@@ -13,12 +13,12 @@ load_dotenv()
 max_streams = 2 # current streamers on twitch
 game_tags = [] # steamspy genre tags ["Shooter"]
 min_date = "2024-01-01"
-popularity_metric = 'average_2weeks' # steamspy field name, other options: 'owners', 'score_rank', 'average_forever', 'median_2weeks'
+popularity_metric = 'average_2weeks' # steamspy field name, other options: 'score_rank', 'average_forever', 'median_2weeks'
 min_popularity = 10 # minimum value for the popularity metric above
 
 # cache settings -- enabling cache is faster but data may be stale
 use_steamspy_cache = True # used for popularity metrics
-use_twitch_cache = False # used for current stream count
+use_twitch_cache = True # used for current stream count
 
 # ============ end user configuration ===========
 
@@ -80,6 +80,7 @@ def get_streams_count(client_id, oauth_token, game_id):
         print(f"An error occurred: {e}")
         return None
 
+
 def get_twitch_oauth_token(twitch_client_id, twitch_client_secret):
     twitch_auth_url = f"https://id.twitch.tv/oauth2/token?client_id={twitch_client_id}&client_secret={twitch_client_secret}&grant_type=client_credentials"
     try:
@@ -126,14 +127,13 @@ def get_steamspy_data(game):
         response = requests.get(url)
         response.raise_for_status()  # Raise an exception for bad status codes
         data = response.json()
-        print(data)
         return data
     except requests.exceptions.RequestException as e:
         print(f"An error occurred: {e}")
         return None
 
 
-def get_game_data(steam_games):
+def enrich_and_filter_games(steam_games):
     with open('game_data.json', 'r') as file:
         try:
             cached_game_data = json.load(file)
@@ -141,57 +141,33 @@ def get_game_data(steam_games):
             print("failed to load cached game data")
             cached_game_data = {}
 
+    ignored_games = []
+    with open('ignored_games.txt', 'r') as file:
+        ignored_games = file.read().splitlines()
 
     game_data = {}
+    all_game_data = {}
     print("retrieving game data...")
     for steam_game in steam_games:
+        if steam_game['name'] in ignored_games:
+            continue
+
         name = steam_game['name']
         data = {
             'steam_info': steam_game
         }
 
-        if cached_game_data[name]: # todo rename to twitch id
-            data['game_id'] = cached_game_data[name]['game_id']
-        else:
-            data['game_id'] = get_game_id(name, twitch_token, TWITCH_CLIENT_ID)
+        cached_game = cached_game_data.get(name)
 
-        if use_steamspy_cache and cached_game_data.get(name).get('steamspy_data'):
+        if use_steamspy_cache and cached_game and cached_game.get('steamspy_data'):
             data['steamspy_data'] = cached_game_data[name]['steamspy_data']
         else:
             data['steamspy_data'] = get_steamspy_data(data)
             sleep(1) # respect rate limit
 
-        if use_twitch_cache and cached_game_data.get(name).get('streams_count'):
-            data['streams_count'] = cached_game_data[name]['streams_count']
-        else:
-            data['streams_count'] = get_streams_count(TWITCH_CLIENT_ID, twitch_token, data['game_id'])
-
-        # if cached_game_data.get(name).get('earliest_review_date'):
-        #     data['earliest_review_date'] = cached_game_data[name]['earliest_review_date']
-        # else:
-        #     data['earliest_review_date'] = get_earliest_review_date(data['steam_info']['appid'])
-
-        game_data[name] = data
-
-    # write cache
-    with open('game_data.json', 'w') as file:
-        json.dump(game_data, file)
-
-    return game_data
-
-
-
-def filter_games():
-    global filtered_games, game, data, key
-    filtered_games = {}
-    for game, data in game_data.items():
-        if data['streams_count'] > max_streams:
-            continue
-
+        # streamspy filters
         if data['steamspy_data'][popularity_metric] < min_popularity:
-            continue
-
-        if min_date and data['earliest_review_date'] < min_date:
+            all_game_data[name] = data
             continue
 
         steamspy_tag_names = [key for key in data['steamspy_data']['tags']]
@@ -200,52 +176,44 @@ def filter_games():
             if tag not in steamspy_tag_names:
                 tag_match = False
         if not tag_match:
+            all_game_data[name] = data
             continue
 
-        filtered_games[game] = data
+        if use_twitch_cache and cached_game and cached_game.get('streams_count'):
+            data['streams_count'] = cached_game_data[name]['streams_count']
+        else:
+            if cached_game and cached_game.get('game_id'): # todo rename to twitch id
+                data['game_id'] = cached_game_data[name]['game_id']
+            else:
+                data['game_id'] = get_game_id(name, twitch_token, TWITCH_CLIENT_ID)
+            data['streams_count'] = get_streams_count(TWITCH_CLIENT_ID, twitch_token, data['game_id'])
 
+        if data['streams_count'] >= max_streams:
+            all_game_data[name] = data
+            continue
 
-# workaround for steam not providing date
-def get_earliest_review_date(steam_game_id, current_min_date=None, cursor=None):
-    url = f"https://store.steampowered.com/appreviews/{steam_game_id}?json=1"
-    if cursor:
-        url += f"&cursor={cursor}"
+        all_game_data[name] = data
+        game_data[name] = data
 
-    try:
-        response = requests.get(url)
-        response.raise_for_status()  # Raise an exception for bad status codes
-        data = response.json()
+    # write cache
+    with open('game_data.json', 'w') as file:
+        json.dump(all_game_data, file)
 
-        if not data.get("reviews"):
-            return current_min_date
-
-        timestamps = [review['timestamp_created'] for review in data['reviews']]
-        cursor = data.get('cursor', None)
-
-        new_earliest_date = min(timestamps)
-        earliest_date = min(current_min_date, new_earliest_date) if current_min_date else new_earliest_date
-
-        if data['cursor']:
-            print(f"earliest date for {steam_game_id}: {earliest_date}")
-            return get_earliest_review_date(steam_game_id, current_min_date=earliest_date, cursor=cursor)
-    except requests.exceptions.RequestException as e:
-        print(f"An error occurred: {e}")
-        return None
+    return game_data
 
 
 print("getting steam games...")
 games = get_owned_games(API_KEY, STEAM_ID)
+print(f"found {len(games)} games")
 
 print("authenticating with twitch...")
 twitch_token = get_twitch_oauth_token(TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET)
 
 print("resolving game data...")
-game_data = get_game_data(games)
-
-print("filtering games...")
-filter_games()
+filtered_games = enrich_and_filter_games(games)
 
 print("sorting games...")
+# sort games by popularity
 sorted_games = sorted(filtered_games.items(), key=lambda x: x[1]['steamspy_data'][popularity_metric], reverse=True)
 
 # print all games
