@@ -12,9 +12,8 @@ load_dotenv()
 # game filters
 max_streams = 2 # current streamers on twitch
 game_tags = [] # steamspy genre tags ["Shooter"]
-min_date = "2024-01-01"
 popularity_metric = 'average_2weeks' # steamspy field name, other options: 'score_rank', 'average_forever', 'median_2weeks'
-min_popularity = 10 # minimum value for the popularity metric above
+min_popularity = 1 # minimum value for the popularity metric above
 
 # cache settings -- enabling cache is faster but data may be stale
 use_steamspy_cache = True # used for popularity metrics
@@ -188,7 +187,7 @@ def enrich_and_filter_games(steam_games):
                 data['game_id'] = get_game_id(name, twitch_token, TWITCH_CLIENT_ID)
             data['streams_count'] = get_streams_count(TWITCH_CLIENT_ID, twitch_token, data['game_id'])
 
-        if data['streams_count'] >= max_streams:
+        if data['streams_count'] > max_streams:
             all_game_data[name] = data
             continue
 
