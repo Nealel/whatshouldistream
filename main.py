@@ -10,14 +10,14 @@ load_dotenv()
 
 # =========== User Configuration ============
 # game filters
-max_streams = 2 # current streamers on twitch
+max_streams = 5 # current streamers on twitch
 game_tags = [] # steamspy genre tags ["Shooter"]
 popularity_metric = 'average_2weeks' # steamspy field name, other options: 'score_rank', 'average_forever', 'median_2weeks'
-min_popularity = 1 # minimum value for the popularity metric above
+min_popularity = 200 # minimum value for the popularity metric above
 
 # cache settings -- enabling cache is faster but data may be stale
 use_steamspy_cache = True # used for popularity metrics
-use_twitch_cache = True # used for current stream count
+use_twitch_cache = False # used for current stream count
 
 # ============ end user configuration ===========
 
@@ -73,7 +73,9 @@ def get_streams_count(client_id, oauth_token, game_id):
 
         # The 'data' key in the response contains the list of streams
         streams = data.get('data', [])
-        return len(streams)
+        view_counts = [stream['viewer_count'] for stream in streams]
+        average_viewers = sum(view_counts) / len(view_counts) if view_counts else 0
+        return len(streams), average_viewers
 
     except requests.exceptions.RequestException as e:
         print(f"An error occurred: {e}")
@@ -181,11 +183,8 @@ def enrich_and_filter_games(steam_games):
         if use_twitch_cache and cached_game and cached_game.get('streams_count'):
             data['streams_count'] = cached_game_data[name]['streams_count']
         else:
-            if cached_game and cached_game.get('game_id'): # todo rename to twitch id
-                data['game_id'] = cached_game_data[name]['game_id']
-            else:
-                data['game_id'] = get_game_id(name, twitch_token, TWITCH_CLIENT_ID)
-            data['streams_count'] = get_streams_count(TWITCH_CLIENT_ID, twitch_token, data['game_id'])
+            get_twitch_id(cached_game, cached_game_data, data, name)
+            data['streams_count'], data['average_viewers'] = get_streams_count(TWITCH_CLIENT_ID, twitch_token, data['game_id'])
 
         if data['streams_count'] > max_streams:
             all_game_data[name] = data
@@ -199,6 +198,13 @@ def enrich_and_filter_games(steam_games):
         json.dump(all_game_data, file)
 
     return game_data
+
+
+def get_twitch_id(cached_game, cached_game_data, data, name):
+    if cached_game and cached_game.get('game_id'):  # todo rename to twitch id
+        data['game_id'] = cached_game_data[name]['game_id']
+    else:
+        data['game_id'] = get_game_id(name, twitch_token, TWITCH_CLIENT_ID)
 
 
 print("getting steam games...")
@@ -215,7 +221,9 @@ print("sorting games...")
 # sort games by popularity
 sorted_games = sorted(filtered_games.items(), key=lambda x: x[1]['steamspy_data'][popularity_metric], reverse=True)
 
+print(f"{'popularity':<20}\t{'average viewers':<20}\t{'current_streams':<20}\tgame")
+
 # print all games
 for game in sorted_games:
-    print(f"{game[1]['steamspy_data'][popularity_metric]}\t {game[0]}")
+    print(f"{game[1]['steamspy_data'][popularity_metric]:<20}\t{game[1].get('average_viewers', 0):<20.1f}\t{game[1].get('streams_count', 0):<20}\t{game[0]}")
     # print(f"{game[0]}: {game[1]['streams_count']} streams, current popularity: {game[1]['steamspy_data']['average_2weeks']}")
