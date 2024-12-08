@@ -6,6 +6,7 @@ import urllib.parse
 import os
 from dotenv import load_dotenv, dotenv_values
 from datetime import datetime
+import statistics
 
 load_dotenv()
 
@@ -87,7 +88,7 @@ def get_streams_count(client_id, oauth_token, game_id):
         # The 'data' key in the response contains the list of streams
         streams = data.get('data', [])
         view_counts = [stream['viewer_count'] for stream in streams]
-        average_viewers = sum(view_counts) / len(view_counts) if view_counts else 0
+        average_viewers = statistics.median(view_counts) if view_counts else 0
         return len(streams), average_viewers
 
     except requests.exceptions.RequestException as e:
@@ -242,26 +243,20 @@ print("sorting games...")
 # sort games by popularity
 sorted_games = sorted(filtered_games.items(), key=lambda x: x[1]['steamspy_data'][popularity_metric], reverse=True)
 
-print(f"{'popularity':<20}\t{'average viewers':<20}\t{'current_streams':<20}\tgame")
-
 # ... (rest of your code)
 def write_output_to_file(sorted_games, popularity_metric, max_streams, min_popularity):
-    current_date = datetime.now().strftime("%Y-%m-%d")
+    current_date= datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     filename = f"output_{popularity_metric}_{max_streams}_{min_popularity}_{current_date}.txt"
 
     with open(filename, 'w') as file:
-        file.write(f"{'popularity':<20}\t{'average viewers':<20}\t{'current_streams':<20}\tgame\n")
+        file.write(f"{'popularity':<20}\t{'median viewers':<20}\t{'current_streams':<20}\tgame\n")
         for game in sorted_games:
             file.write(f"{game[1]['steamspy_data'][popularity_metric]:<20}\t{game[1].get('average_viewers', 0):<20.1f}\t{game[1].get('streams_count', 0):<20}\t{game[0]}\n")
 
+    print(f"Output written to {filename}")
 
-print("sorting games...")
-sorted_games = sorted(filtered_games.items(), key=lambda x: x[1]['steamspy_data'][popularity_metric], reverse=True)
+print(f"{'popularity':<20}\t{'average viewers':<20}\t{'current_streams':<20}\tgame")
+for game in sorted_games:
+    print(f"{game[1]['steamspy_data'][popularity_metric]:<20}\t{game[1].get('average_viewers', 0):<20.1f}\t{game[1].get('streams_count', 0):<20}\t{game[0]}")
 
-# print(f"{'popularity':<20}\t{'average viewers':<20}\t{'current_streams':<20}\tgame")
-# for game in sorted_games:
-#     print(f"{game[1]['steamspy_data'][popularity_metric]:<20}\t{game[1].get('average_viewers', 0):<20.1f}\t{game[1].get('streams_count', 0):<20}\t{game[0]}")
-
-
-# Write output to file
 write_output_to_file(sorted_games, popularity_metric, max_streams, min_popularity)
