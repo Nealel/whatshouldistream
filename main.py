@@ -5,15 +5,17 @@ import json
 import urllib.parse
 import os
 from dotenv import load_dotenv, dotenv_values
+from datetime import datetime
 
 load_dotenv()
 
 # =========== User Configuration ============
 # game filters
-max_streams = 5 # current streamers on twitch
+max_streams = 50 # current streamers on twitch
 game_tags = [] # steamspy genre tags ["Shooter"]
 popularity_metric = 'average_2weeks' # steamspy field name, other options: 'score_rank', 'average_forever', 'median_2weeks'
 min_popularity = 200 # minimum value for the popularity metric above
+mode = "top" # "top" or "owned
 
 # cache settings -- enabling cache is faster but data may be stale
 use_steamspy_cache = True # used for popularity metrics
@@ -58,6 +60,17 @@ def get_owned_games(api_key, steam_id):
     except KeyError:
         print("Failed to parse the API response. The structure may have changed.")
 
+
+def get_top_games():
+    url = "https://steamspy.com/api.php?request=top100in2weeks"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an exception for bad status codes
+        data = response.json()
+        return list(data.values())
+    except requests.exceptions.RequestException as e:
+        print(f"An error occurred getting top games from steamsy: {e}")
+        exit(1)
 
 def get_streams_count(client_id, oauth_token, game_id):
     url = f"https://api.twitch.tv/helix/streams?game_id={game_id}"
@@ -163,6 +176,7 @@ def enrich_and_filter_games(steam_games):
         if use_steamspy_cache and cached_game and cached_game.get('steamspy_data'):
             data['steamspy_data'] = cached_game_data[name]['steamspy_data']
         else:
+            print("no cached steamspy data for game ", name, " fetching...")
             data['steamspy_data'] = get_steamspy_data(data)
             sleep(1) # respect rate limit
 
@@ -171,7 +185,7 @@ def enrich_and_filter_games(steam_games):
             all_game_data[name] = data
             continue
 
-        steamspy_tag_names = [key for key in data['steamspy_data']['tags']]
+        steamspy_tag_names = [key.lower() for key in data['steamspy_data']['tags']]
         tag_match = True
         for tag in game_tags:
             if tag not in steamspy_tag_names:
@@ -208,7 +222,14 @@ def get_twitch_id(cached_game, cached_game_data, data, name):
 
 
 print("getting steam games...")
-games = get_owned_games(API_KEY, STEAM_ID)
+if mode == "top":
+    games = get_top_games()
+elif mode == "owned":
+    games = get_owned_games(API_KEY, STEAM_ID)
+else:
+    print("invalid mode. Mode must be either top or owned")
+    exit(1)
+
 print(f"found {len(games)} games")
 
 print("authenticating with twitch...")
@@ -223,7 +244,24 @@ sorted_games = sorted(filtered_games.items(), key=lambda x: x[1]['steamspy_data'
 
 print(f"{'popularity':<20}\t{'average viewers':<20}\t{'current_streams':<20}\tgame")
 
-# print all games
-for game in sorted_games:
-    print(f"{game[1]['steamspy_data'][popularity_metric]:<20}\t{game[1].get('average_viewers', 0):<20.1f}\t{game[1].get('streams_count', 0):<20}\t{game[0]}")
-    # print(f"{game[0]}: {game[1]['streams_count']} streams, current popularity: {game[1]['steamspy_data']['average_2weeks']}")
+# ... (rest of your code)
+def write_output_to_file(sorted_games, popularity_metric, max_streams, min_popularity):
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    filename = f"output_{popularity_metric}_{max_streams}_{min_popularity}_{current_date}.txt"
+
+    with open(filename, 'w') as file:
+        file.write(f"{'popularity':<20}\t{'average viewers':<20}\t{'current_streams':<20}\tgame\n")
+        for game in sorted_games:
+            file.write(f"{game[1]['steamspy_data'][popularity_metric]:<20}\t{game[1].get('average_viewers', 0):<20.1f}\t{game[1].get('streams_count', 0):<20}\t{game[0]}\n")
+
+
+print("sorting games...")
+sorted_games = sorted(filtered_games.items(), key=lambda x: x[1]['steamspy_data'][popularity_metric], reverse=True)
+
+# print(f"{'popularity':<20}\t{'average viewers':<20}\t{'current_streams':<20}\tgame")
+# for game in sorted_games:
+#     print(f"{game[1]['steamspy_data'][popularity_metric]:<20}\t{game[1].get('average_viewers', 0):<20.1f}\t{game[1].get('streams_count', 0):<20}\t{game[0]}")
+
+
+# Write output to file
+write_output_to_file(sorted_games, popularity_metric, max_streams, min_popularity)
